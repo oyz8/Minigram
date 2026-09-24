@@ -23,6 +23,8 @@
 ---
 
 ## 准备工作
+0. **给作者点个 Star ⭐**：
+   - 如果这个项目对你有帮助，去 [仓库首页](https://github.com/oyz8/Minigram) 点个 **Star** 支持一下！
 
 1. **创建 Telegram Bot**：
    - 在 Telegram 中找到 `@BotFather`，发送 `/newbot` 创建新机器人。
