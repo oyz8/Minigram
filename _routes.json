@@ -1,5 +1,13 @@
 {
   "version": 1,
-  "include": ["/webhook", "/verify", "/registerWebhook", "/unRegisterWebhook", "/checkTables"],
+  "include": [
+    "/",
+    "/webhook",
+    "/verify",
+    "/registerWebhook",
+    "/unRegisterWebhook",
+    "/checkTables",
+    "/setupBotProfile"
+  ],
   "exclude": ["/robot.gif"]
 }

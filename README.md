@@ -1,655 +1,200 @@
 # Minigram · 部署与使用文档
 
-> 一个部署在 Cloudflare Pages 上的 Telegram 私聊中转机器人：把用户私聊消息镜像到群组话题、内置 Turnstile 人机验证、支持消息编辑同步与管理面板。
+> 部署在 Cloudflare Pages 上的 Telegram 私聊中转机器人：把用户私聊消息镜像到群组话题，带 Turnstile 人机验证、消息编辑同步、管理面板。
 
 ---
 
-## 目录
+## 变量速查
 
-- [功能特性](#功能特性)
-- [准备工作](#准备工作)
-- [环境变量](#环境变量)
-- [获取密钥与 ID](#获取密钥与-id)
-- [部署步骤](#部署步骤)
-- [初始化](#初始化)
-- [使用说明](#使用说明)
-- [命令一览](#命令一览)
-- [数据库表结构](#数据库表结构)
-- [常见问题](#常见问题)
-- [安全建议](#安全建议)
-- [致谢](#致谢)
-
----
-
-## 功能特性
-
-| 功能 | 说明 |
-|---|---|
-| 私聊中转 | 用户私聊 Bot → 自动镜像到群组对应话题 |
-| 话题隔离 | 每个用户自动拥有一个独立话题，管理员回复会转发回用户 |
-| 人机验证 | Cloudflare Turnstile 验证，有效期 7 天，到期自动重新验证 |
-| 多端一致 | 桌面 / Android / iOS / 浏览器均可完成验证（不依赖 WebApp.sendData） |
-| 编辑同步 | 用户编辑私聊消息 → 群组副本自动更新 |
-| 删除同步 | 回复消息发 `/del` → 删除群组副本（群组仅管理员可用） |
-| 管理面板 | 拉黑 / 解黑 / 查询用户 / 查询黑名单 / 开关验证 / 删除用户 |
-| 频率限制 | 消息 1 分钟上限 + `/start` 5 分钟一次 |
-| Owner 免验 | 机器人所有者私聊被静默忽略 |
-| 菜单精简 | 私聊显示 `/start`，群组和 Owner 隐藏命令菜单 |
-| 自动化配置 | 部署后自动注册 webhook（带 secret_token）+ 设置 Bot 描述 + 建表 |
-| Webhook 校验 | 通过 `secret_token` 校验 Telegram 请求，防伪造 |
-| 管理端点鉴权 | 管理端点需 `SHARED_SECRET`，防未授权访问 |
-| 验证 token 签名 | `/verify` token 使用 HMAC-SHA256 签名，防伪造 |
+| 变量 | 必填 | 来源 |
+|---|---|---|
+| `BOT_TOKEN_ENV` | ✅ | BotFather |
+| `GROUP_ID_ENV` | ✅ | 后台群组 |
+| `OWNER_ID` | ✅ | @userinfobot |
+| `SHARED_SECRET` | ✅ | `openssl rand -hex 32` |
+| `PUBLIC_ORIGIN` | ✅ | 自定义域名 |
+| `CAPTCHA_SITE_KEY` | ✅ | Turnstile |
+| `CAPTCHA_SECRET_KEY` | ✅ | Turnstile |
+| `MAX_MESSAGES_PER_MINUTE_ENV` | ❌ | 默认 40 |
+| `BOT_DESCRIPTION` | ❌ | 自定义 |
+| `BOT_SHORT_DESCRIPTION` | ❌ | 自定义 |
+| `D1`（绑定） | ✅ | D1 数据库 |
 
 ---
 
 ## 准备工作
 
-### 开始之前，把下面变量准备好
+1. **创建 Telegram Bot**：
+   - 在 Telegram 中找到 `@BotFather`，发送 `/newbot` 创建新机器人。
+   - 按照提示设置机器人名称和用户名，获取 Bot Token（例如 `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`）。
+   - 记录为 `BOT_TOKEN_ENV`。
 
-```bash
-# ===== Telegram =====
-BOT_TOKEN_ENV                  # Bot Token（从 @BotFather 获取）
-GROUP_ID_ENV                   # 群组 ID（-100 开头）
-OWNER_ID                       # 你自己的 Telegram User ID
+2. **创建后台群组**：
+   - 创建一个 Telegram 群组。
+   - 群组的“话题功能”打开。
+   - 添加机器人为管理员，建议权限全给（消息管理，话题管理）。
+   - 获取群组的 Chat ID（例如 `-100123456789`），可以通过 `@getidsbot` 获取（拉它进群）。
+   - 记录为 `GROUP_ID_ENV`。
 
-# ===== Cloudflare =====
-CAPTCHA_SECRET_KEY             # Turnstile Secret Key
-CAPTCHA_SITE_KEY               # Turnstile Site Key
+3. **获取自己的 User ID**：
+   - 在 Telegram 中找到 `@userinfobot`，私聊发送任意消息。
+   - 它会返回你的 User ID（例如 `6983385803`）。
+   - 记录为 `OWNER_ID`。
 
-# ===== 密钥、URL =====
-PUBLIC_ORIGIN                  # 你的自定义域名，如 https://tg.example.com
-SHARED_SECRET                  # 三合一共享密钥（webhook 校验 + 管理端点 + 验证 token 签名）
+4. **生成共享密钥**：
+   - 本地终端执行 `openssl rand -hex 32`。
+   - 输出形如 `7f3a9c2b8d1e4f6a...`（64 位 hex）。
+   - 记录为 `SHARED_SECRET`。
+   - ⚠️ 不要用 `openssl rand -base64 15`，base64 含 `+` `/` `=`，会让 `setWebhook` 失败。
 
-# ===== 可选 =====
-MAX_MESSAGES_PER_MINUTE_ENV    # 每分钟消息上限，默认 40
-BOT_DESCRIPTION                # Bot 描述文案（可选，默认有值）
-BOT_SHORT_DESCRIPTION          # Bot 简介文案（可选，默认有值）
-```
-
-> ⚠️ **本项目使用单一共享密钥 `SHARED_SECRET`**，同时承担三个职责：
-> 1. Telegram webhook `secret_token` 校验
-> 2. 管理端点（`/checkTables` 等）鉴权
-> 3. `/verify` token 的 HMAC 签名
->
-> 一钥失守 = 全线失守。请严格保密，不要写进任何公开位置。
-
----
-
-## 环境变量
-
-在 Cloudflare Pages → Settings → Environment variables 中配置，**Production 和 Preview 两个环境都要加**：
-
-| 变量名 | 必填 | 说明 |
-|---|---|---|
-| `BOT_TOKEN_ENV` | ✅ | Telegram Bot Token |
-| `GROUP_ID_ENV` | ✅ | 群组 ID，`-100` 开头的负数 |
-| `OWNER_ID` | ✅ | 机器人所有者 User ID |
-| `CAPTCHA_SECRET_KEY` | ✅ | Turnstile 密钥 |
-| `CAPTCHA_SITE_KEY` | ✅ | Turnstile 站点密钥 |
-| `PUBLIC_ORIGIN` | ✅ | 对外访问域名，如 `https://tg.example.com` |
-| `SHARED_SECRET` | ✅ | 三合一共享密钥，**只允许 `[A-Za-z0-9_-]`，长度 1–256** |
-| `MAX_MESSAGES_PER_MINUTE_ENV` | ❌ | 消息频率上限，默认 40 |
-| `BOT_DESCRIPTION` | ❌ | 自定义 Bot 描述，用 `\|` 代表换行 |
-| `BOT_SHORT_DESCRIPTION` | ❌ | 自定义 Bot 简介 |
-
-**D1 绑定**（不是环境变量，在 Pages → Settings → Functions → D1 database bindings 里配置）：
-
-| 绑定名 | 值 |
-|---|---|
-| `D1` | 你创建的 D1 数据库 |
+5. **创建 D1 数据库**：
+   - Cloudflare Dashboard → **Workers & Pages** → **D1** → **Create database**。
+   - 名称填 `tg-private-bot`。
+   - 不需要手动建表，代码会自动初始化。
 
 ---
 
-## 获取密钥与 ID
+## 部署 Pages 项目
 
-### Telegram Bot Token
+6. **部署项目**：
+   - Cloudflare Dashboard → **Workers & Pages** → **Create** → **Pages** → **Connect to Git**。
+   - 选择你的仓库（本项目 fork 后的仓库）。
+   - Build command：**留空**。
+   - Build output directory：`public`。
+   - 点 **Save and Deploy**。
 
-与 [@BotFather](https://t.me/BotFather) 对话创建 Bot：
+7. **绑定 D1**：
+   - Pages 项目 → **Settings** → **Functions** → **D1 database bindings**。
+   - `Variable name`: `D1`
+   - `D1 database`: `tg-private-bot`
 
-```
-/newbot
-→ 输入 Bot 显示名
-→ 输入 Bot 用户名（必须以 bot 结尾）
-→ 获得 Token，格式：123456789:ABCDEFGHIKabcnopqrstuvwxyzA
-```
-
-### 群组 ID
-
-1. 在 Telegram 里**新建超级群组**
-2. 群组设置 → **开启 Topics（话题）功能**
-3. 把 Bot 拉进群组 → 设为**管理员**，至少给以下权限：
-   - ✅ **Manage Topics**（创建 / 删除话题）
-   - ✅ **Pin Messages**（置顶用户信息）
-   - ✅ **Delete Messages**（删除测试消息）
-4. 获取群组 ID：
-   - 用 [@getidsbot](https://t.me/getidsbot) 转发任意群消息给它
-   - 或邀请 [@userinfobot](https://t.me/userinfobot) 进群
-   - 或直接调用 Bot API `getUpdates`
-   - 格式：`-100xxxxxxxxxx`
-
-### 自定义域名（必须）
-
-**本项目必须使用自定义域名，不使用 Pages 默认的 `<项目名>.pages.dev`。**
-
-#### 情况 A：域名已在 Cloudflare 托管（推荐）
-
-1. Pages 项目 → **Custom domains** → **Set up a custom domain**
-2. 输入域名，例如 `tg.example.com`
-3. 域名在 Cloudflare 托管时会**自动添加 CNAME 记录**，无需手动操作
-4. 等 SSL 证书签发（约 1 分钟，最长 24 小时）
-5. 访问 `https://tg.example.com` 确认能打开
-
-#### 情况 B：域名在其它服务商
-
-1. 在 Pages 项目 → **Custom domains** → 输入域名，例如 `tg.example.com`
-2. 按提示去域名服务商处添加 **CNAME 记录**，指向 `<项目名>.pages.dev`
-   - 主机记录：填子域名前缀（如 `tg`），或 `@` 表示根域名
-   - 记录类型：`CNAME`
-   - 记录值：`<项目名>.pages.dev`
-3. 等待 DNS 生效（1-30 分钟，最长 24 小时）
-4. 回到 Pages 页面，状态变为 **Active** 后即可访问
-
-> 如果域名服务商不支持 CNAME 泛解析或根域名 CNAME，建议把域名 NS 改到 Cloudflare 托管，用情况 A 的方式。
-
-#### 完成后
-
-```
-访问 https://tg.example.com/                    → 跳转到项目 GitHub
-访问 https://tg.example.com/verify?token=...    → 打开验证页
-访问 https://tg.example.com/robot.gif           → 验证页头像
-```
-
-### Turnstile 密钥
-
-**必须在自定义域名绑定成功后再创建 Turnstile**，否则域名不一致会导致验证框加载失败。
-
-1. 登录 Cloudflare Dashboard
-2. 左侧菜单 → **Turnstile** → **Add Site**
-3. 站点名称随意（如 `Minigram Verification`）
-4. **Domain** 填你的**自定义域名**，如 `tg.example.com`
-   - 想支持多个子域 → 分别 Add
-5. Widget Mode 选 **Managed**
-6. 创建 → 记录：
-   - **Site Key** → `CAPTCHA_SITE_KEY`
-   - **Secret Key** → `CAPTCHA_SECRET_KEY`
-
-> ⚠️ **域名必须和 `PUBLIC_ORIGIN` 完全一致**（不含协议、不含尾斜杠）。不一致时 Turnstile 会加载失败，用户看不到验证框。
-
-### 共享密钥 SHARED_SECRET
-
-**必须**用下面命令生成（只含 `0-9a-f`，满足 Telegram `[A-Za-z0-9_-]{1,256}` 限制）：
-
-```bash
-openssl rand -hex 32
-```
-
-输出形如：
-
-```
-7f3a9c2b8d1e4f6a...
-```
-
-复制结果作为 `SHARED_SECRET`。
-
-> ⚠️ **不要用 `openssl rand -base64 15`**——base64 输出可能含 `+`、`/`、`=`，会导致 `setWebhook` 失败。
->
-> ⚠️ **一旦确定后不要轻易更换**，换了会同时导致：
-> - 所有已签发的验证 token 立即失效，所有用户需要重新验证
-> - Telegram webhook `secret_token` 不匹配，机器人收不到消息，需要重新注册 webhook
-> - 所有管理端点凭据变更
-
-### 你的 User ID
-
-找 [@userinfobot](https://t.me/userinfobot) 私聊，它会告诉你 User ID，填到 `OWNER_ID`。
+8. **绑定自定义域名**：
+   - Pages 项目 → **Custom domains** → **Set up a custom domain**。
+   - 输入域名（如 `tg.example.com`），按提示完成解析。
+   - 等状态变 **Active**。
+   - 记录为 `PUBLIC_ORIGIN`（含 `https://`，不含尾斜杠）。
+   - ⚠️ 必须使用自定义域名，不能用 `pages.dev`，否则 Turnstile 会失败。
 
 ---
 
-## 部署步骤
+## 创建 Turnstile
 
-### 部署顺序（推荐按此顺序）
+9. **创建 Turnstile**：
+   - Cloudflare Dashboard → **Turnstile** → **Add Site**。
+   - 站点名称随意，如 `Minigram Verification`。
+   - Domain 填自定义域名（如 `tg.example.com`）。
+   - Widget Mode 选 **Managed**。
+   - 记录 `CAPTCHA_SITE_KEY` 和 `CAPTCHA_SECRET_KEY`。
+   - ⚠️ 必须在自定义域名 Active 之后再创建，域名不一致验证框加载不出来。
 
-```
-1. 创建 D1 数据库
-2. 部署 Pages 项目
-3. 绑定 D1
-4. 绑定自定义域名            ← 关键，先做这步
-5. 域名状态变 Active
-6. 创建 Turnstile（域名填自定义域名）
-7. 生成 SHARED_SECRET 并配置所有环境变量（PUBLIC_ORIGIN 用自定义域名）
-8. 重新部署
-9. 用带鉴权的方式访问 /checkTables
-```
+---
 
-### 1. 创建 D1 数据库
+## 配置环境变量
 
-Cloudflare Dashboard → **Workers & Pages** → **D1** → **Create database**
-
-- 名称：如 `tg-private-bot`
-- 创建完成后不需要手动建表，代码会自动初始化
-
-### 2. 部署 Pages 项目
-
-**方式 A：连接 Git 仓库（推荐）**
-
-1. Cloudflare Dashboard → **Workers & Pages** → **Create** → **Pages** → **Connect to Git**
-2. 选择你的仓库（本项目 fork 后的仓库）
-3. 构建设置：
-   - Build command：**留空**
-   - Build output directory：`public`
-4. 部署
-
-**方式 B：Wrangler CLI**
-
-```bash
-npm i -g wrangler
-wrangler login
-wrangler pages deploy public --project-name=your-pages
-```
-
-**方式 C：直接上传**
-
-Dashboard → Pages → Create → Upload assets → 上传 `functions/` 和 `public/` 目录
-
-### 3. 绑定 D1
-
-Pages 项目 → **Settings** → **Functions** → **D1 database bindings**
+10. **配置环境变量**：
+    - Pages 项目 → **Settings** → **Environment variables**。
 
 ```
-Variable name: D1
-D1 database:   tg-private-bot
+BOT_TOKEN_ENV      = ...
+GROUP_ID_ENV       = -100...
+OWNER_ID           = ...
+CAPTCHA_SECRET_KEY = ...
+CAPTCHA_SITE_KEY   = ...
+PUBLIC_ORIGIN      = https://tg.example.com
+SHARED_SECRET      = ...
 ```
 
-### 4. 绑定自定义域名
-
-见上文「[自定义域名（必须）](#自定义域名必须)」章节。
-
-### 5. 创建 Turnstile
-
-见上文「[Turnstile 密钥](#turnstile-密钥)」章节。
-
-### 6. 生成 SHARED_SECRET 并配置环境变量
-
-```bash
-openssl rand -hex 32
-```
-
-Pages 项目 → **Settings** → **Environment variables**
-
-把上面「环境变量」表里的所有变量填进去，**Production 和 Preview 都加**。
-
-**关键项**：
-
-```
-PUBLIC_ORIGIN = https://tg.example.com      # 必须和绑定的自定义域名完全一致
-SHARED_SECRET = <openssl rand -hex 32 的输出>
-```
-
-### 7. 重新部署
-
-修改环境变量后，去 **Deployments** 页面，重新部署一次（或者推一次代码触发构建），让新环境变量生效。
-
-### 8. `_routes.json` 检查
-
-确保 `_routes.json` 包含以下路径（否则 Functions 不会被触发）：
-
-```json
-{
-  "version": 1,
-  "include": [
-    "/",
-    "/webhook",
-    "/verify",
-    "/registerWebhook",
-    "/unRegisterWebhook",
-    "/checkTables",
-    "/setupBotProfile"
-  ],
-  "exclude": ["/robot.gif"]
-}
-```
+11. **重新部署**：
+    - 改了环境变量必须重新部署才生效。
+    - Pages 项目 → **Deployments** → **Retry deployment**。
 
 ---
 
 ## 初始化
 
-部署完成后，**用带鉴权的方式**访问一次：
+12. **触发初始化**：
+    - 部署完成后访问一次带鉴权的 `/checkTables`：
 
 ```bash
-curl "https://<你的自定义域名>/checkTables" \
+curl "https://tg.example.com/checkTables" \
      -H "X-Admin-Key: <SHARED_SECRET>"
 ```
 
-或直接在浏览器访问（不推荐，URL 会进日志）：
+    - 返回 `Database tables checked and repaired` 表示：
+      - ✅ 建好 5 张表
+      - ✅ 写入默认设置（验证码默认开启）
+      - ✅ 自动注册 webhook（带 `secret_token`）
+      - ✅ 配置 Bot 描述、简介、命令菜单
 
-```
-https://<你的自定义域名>/checkTables?key=<SHARED_SECRET>
-```
-
-返回 `Database tables checked and repaired` 表示：
-
-- ✅ 建好 5 张表
-- ✅ 写入默认设置（验证码默认开启）
-- ✅ 自动注册 webhook 到 `https://<你的自定义域名>/webhook`（带 `secret_token`）
-- ✅ 检查 Bot 是否有群组权限
-- ✅ 自动配置 Bot 描述、简介、命令菜单
-
-**验证 webhook 是否成功：**
-
-```
-https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo
-```
-
-`url` 应为 `https://<你的自定义域名>/webhook`，`pending_update_count` 为 0，`last_error_message` 为空。
-
-**手动刷新 Bot 资料（可选）：**
+13. **验证 webhook**：
 
 ```bash
-curl "https://<你的自定义域名>/setupBotProfile" \
-     -H "X-Admin-Key: <SHARED_SECRET>"
+curl "https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo"
 ```
 
-**手动重设 webhook（可选）：**
-
-```bash
-curl "https://<你的自定义域名>/registerWebhook" \
-     -H "X-Admin-Key: <SHARED_SECRET>"
-```
-
-> ⚠️ **强烈建议使用 `X-Admin-Key` 请求头**，不要用 `?key=` 走 URL。URL 会进入 Cloudflare 访问日志、浏览器历史，以及可能通过 `Referer` 泄露。
+    - `url` 应为 `https://tg.example.com/webhook`
+    - `pending_update_count` 为 `0`
+    - `last_error_message` 为空
 
 ---
 
 ## 使用说明
 
-### 用户视角
+14. **用户视角**：
+    - 私聊 Bot，发任意消息 → 收到验证按钮。
+    - 点击 `✅ 点击验证` → 打开 Mini App → 完成 Turnstile。
+    - 验证通过 → 话题自动创建，可以正常发消息。
+    - 验证有效期 7 天，到期自动重新验证。
 
-| 步骤 | 操作 | 结果 |
-|---|---|---|
-| 1 | 私聊 Bot，发任意消息 | 收到 `😮‍💨 先验一下。点下面，5 分钟。` + 验证按钮 |
-| 2 | 点击 `✅ 点击验证` | 打开 Mini App，完成 Turnstile |
-| 3 | 验证通过 | 收到 `😮‍💨 行了，进来了。`，话题自动创建 |
-| 4 | 直接发消息 | 消息以 `昵称:\n内容` 的形式转发到话题 |
-| 5 | 验证 7 天后过期 | 自动弹新按钮，重新验证 |
-
-**兜底机制**：如果按钮点不开，**再发一条消息** → Bot 会推纯文本链接：
-
-```
-🔗 链接在这，5 分钟：
-https://<你的自定义域名>/verify?token=...
-```
-
-### 管理员视角
-
-管理员在**用户话题内**操作：
-
-1. **打开面板**：在话题里发 `/admin`
-2. **面板按钮**：
-
-   ```
-   [ 拉黑用户 ]     [ 解除拉黑 ]
-   [ 查询用户信息 ] [ 查询黑名单 ]
-   [ 关闭验证码 ]   [ 🗑 删除用户 ]
-   [    ⭐️ 项目地址 ⭐️    ]
-   ```
-
-3. **回复用户**：直接在自己话题里回复，消息会通过 `copyMessage` 转发回用户私聊
-4. **删除消息**：回复某条消息发 `/del`，群组副本会被删除（映射同时清理）
-
-### 特殊场景
-
-| 场景 | 行为 |
-|---|---|
-| Owner 私聊 Bot | 静默忽略，不验证不转发 |
-| 群组普通成员发 `/del` | 静默忽略 |
-| 群组普通成员发 `/admin` | 打开面板后，点击任意按钮时提示"只有管理员可以使用此功能" |
-| 用户在私聊里发 `/del` | 删除群组副本 + 清理映射（Bot 无法删除用户私聊消息，需用户自行删除） |
-| 用户编辑私聊消息 | 群组副本自动更新（保留昵称前缀） |
-| 管理员编辑群组消息 | 尝试同步到私聊（仅文本，因 Bot 无法编辑用户消息，可能失败） |
+15. **管理员视角**：
+    - 在用户话题里发 `/admin` → 打开管理面板。
+    - 面板按钮：拉黑 / 解黑 / 查用户 / 查黑名单 / 开关验证 / 删用户。
+    - 直接回复话题内消息 → 转发回用户私聊。
+    - 回复某消息发 `/del` → 删除群组副本。
 
 ---
 
 ## 命令一览
 
-| 命令 | 使用位置 | 权限 | 说明 |
+| 命令 | 位置 | 权限 | 说明 |
 |---|---|---|---|
 | `/start` | 私聊 | 所有人 | 开始使用 |
-| `/del` | 私聊 / 群组话题 | 私聊任何人，群组仅管理员 | 回复要删除的消息后发送，删除群组副本 |
+| `/del` | 私聊 / 群组话题 | 私聊任何人，群组仅管理员 | 回复消息后发送，删除群组副本 |
 | `/admin` | 群组话题 | 管理员 | 打开管理面板 |
-
-**命令菜单显示**：
-
-| 场景 | 菜单显示 |
-|---|---|
-| 私聊普通用户 | `/start` |
-| 私聊 Owner | 无 |
-| 群组（成员/管理员） | 无 |
-
----
-
-## 数据库表结构
-
-代码会在首次访问 `/checkTables` 时自动创建以下表：
-
-### `user_states` — 用户状态
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `chat_id` | TEXT PK | 用户 ID |
-| `is_blocked` | BOOLEAN | 是否被拉黑 |
-| `is_verified` | BOOLEAN | 是否已验证 |
-| `verified_expiry` | INTEGER | 验证过期时间（Unix 秒）|
-| `code_expiry` | INTEGER | 验证码过期时间 |
-| `is_first_verification` | BOOLEAN | 是否首次验证（首验跳过频率检查）|
-| `is_verifying` | BOOLEAN | 是否正在验证流程中 |
-
-### `message_rates` — 频率计数
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `chat_id` | TEXT PK | 用户 ID |
-| `message_count` | INTEGER | 当前窗口消息数 |
-| `window_start` | INTEGER | 窗口起始时间 |
-| `start_count` | INTEGER | `/start` 次数 |
-| `start_window_start` | INTEGER | `/start` 窗口起始 |
-
-### `chat_topic_mappings` — 用户↔话题映射
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `chat_id` | TEXT PK | 用户 ID |
-| `topic_id` | TEXT | 话题 ID |
-
-### `message_mappings` — 消息映射（编辑/删除同步用）
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `chat_id` + `private_message_id` | PK | 私聊消息标识 |
-| `topic_id` | INTEGER | 话题 ID |
-| `group_message_id` | INTEGER | 群组消息 ID |
-| `created_at` | INTEGER | 创建时间（30 天后自动清理）|
-
-### `settings` — 全局设置
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `key` | TEXT PK | 设置键 |
-| `value` | TEXT | 设置值 |
-
-目前使用 `verification_enabled`（`true` / `false`）。
 
 ---
 
 ## 常见问题
 
-### Q1：APP 端验证按钮点不开，走了网页逻辑？
-
-旧版存在此问题，新版通过**服务端直接验证**解决：Mini App 完成 Turnstile 后由服务端更新 DB 并推送通知，**不依赖 `Telegram.WebApp.sendData`**。
-
-如果仍然遇到，尝试：
-- 清 Telegram APP 缓存
-- 换一个没用过 Bot 的账号测试
-- 检查 `PUBLIC_ORIGIN` 是否与访问域名完全一致
-
-### Q2：无限弹验证？
-
-已修复。根因是跨 Worker 实例的用户状态缓存陈旧，新版已改为**每次私聊消息都从 D1 读用户状态**。
-
-### Q3：验证卡住了，刷新后验证码还是新的吗？
-
-**不是全新 token，但会重新计时。** 每次访问 `/verify`（含刷新）都会把 `code_expiry` 重置为 `now + 300`，所以刷新后你又有 5 分钟。
-
-想拿全新 token，在私聊里再发条消息即可。
-
-### Q4：Bot 不回消息？
-
-按顺序排查：
-
-1. `getWebhookInfo` 检查 webhook 是否正常，`last_error_message` 是否有报错
-2. 确认 `SHARED_SECRET` 已配置且格式正确（`[A-Za-z0-9_-]`，1–256 字符）
-3. Pages → Functions → Real-time Logs 看请求日志
-4. 确认 `BOT_TOKEN_ENV`、`GROUP_ID_ENV` 配置正确
-5. 确认 Bot 是群管理员，且有 Manage Topics 权限
-
-### Q5：话题创建失败？
-
-Bot 不是管理员，或缺少 `Manage Topics` 权限。
-
-### Q6：置顶消息失败？
-
-Bot 缺少 `Pin Messages` 权限。
-
-### Q7：删除用户时话题没删掉？
-
-`deleteForumTopic` 需要 Bot 有 `Manage Topics` 权限，且群组必须是超级群组。
-
-### Q8：D1 报 "table not found"？
-
-访问一次带鉴权的 `/checkTables` 触发建表：
-
-```bash
-curl "https://<自定义域名>/checkTables" \
-     -H "X-Admin-Key: <SHARED_SECRET>"
-```
-
-### Q9：验证链接里显示的是 pages.dev 域名？
-
-说明 `PUBLIC_ORIGIN` 没配置或配置错了。修复：
-
-1. 确认自定义域名已绑定且 Active
-2. 检查 `PUBLIC_ORIGIN` 是否等于自定义域名（含 `https://`，不含尾斜杠）
-3. 重新部署
-4. 用带鉴权的方式访问 `/registerWebhook` 重设 webhook
-5. 用带鉴权的方式访问 `/setupBotProfile` 刷新描述
-
-### Q10：Turnstile 显示"域名校验失败"或验证框加载不出来？
-
-Turnstile 里配置的域名和实际访问的域名不一致。检查：
-
-1. Turnstile Dashboard → 你的站点 → 查看 Domain 列表
-2. 确保里面包含 `PUBLIC_ORIGIN` 里的域名
-3. 缺了就 Add 上去
-4. 不要通过 pages.dev 域名访问——只能走自定义域名
-
-### Q11：访问 pages.dev 域名能用吗？
-
-能访问，但**不建议**——Turnstile 校验会失败（因为没在 Turnstile 里注册）。始终通过自定义域名访问。
-
-### Q12：`/del` 没反应？
-
-- 群组里：只有**管理员**能用，普通成员发会被静默忽略
-- 私聊里：任何人都能用，但**必须先回复**要删的消息；Bot 无法删除用户私聊消息，只能删除群组副本 + 清理映射
-- 检查 `message_mappings` 表里是否有该消息的映射（旧消息可能没有）
-
-### Q13：验证完成后还提示"先验一下"？
-
-1. 检查 `user_states.is_verified` 和 `verified_expiry` 字段
-2. 如果 `is_verified = 1` 但 `verified_expiry < now`，说明已过期（7 天有效期）
-3. 如果都不对，可能是缓存问题，等待 Worker 实例重启
-
-### Q14：第一次访问很慢？
-
-Worker 冷启动 + 初始化任务（建表、注册 webhook、设置 Bot 资料）。之后的请求会快很多。
-
-### Q15：访问管理端点返回 401 Unauthorized？
-
-说明鉴权失败。检查：
-
-1. 确认 `SHARED_SECRET` 已配置
-2. 请求头 `X-Admin-Key` 是否与 `SHARED_SECRET` 完全一致
-3. 或 `?key=` 参数是否正确
-4. 注意不要有前后空格
-
-### Q16：`setWebhook` 报错 `secret_token is invalid`？
-
-`SHARED_SECRET` 格式不符合 Telegram 要求。必须是 `[A-Za-z0-9_-]`，长度 1–256。
-
-**最常见原因**：用了 base64 生成。改用：
-
-```bash
-openssl rand -hex 32
-```
-
-### Q17：`/verify?token=...` 返回 "Token is invalid"？
-
-说明 token 签名校验失败。可能原因：
-
-1. `SHARED_SECRET` 被更换过——旧 token 全部失效，用户需重新触发验证
-2. token 被篡改
-3. token 已过期（超过 1 小时）
-
-让用户在私聊里再发一条消息，触发新 token。
-
-### Q18：`/webhook` 返回 401 Unauthorized？
-
-Telegram 请求头 `X-Telegram-Bot-Api-Secret-Token` 与 `SHARED_SECRET` 不一致。可能原因：
-
-1. `SHARED_SECRET` 被更换但没重新注册 webhook——访问 `/registerWebhook` 重设
-2. 有第三方在伪造请求（这正是该机制要拦的）
+- **Bot 不回消息**：`getWebhookInfo` 看 `last_error_message`；确认 `SHARED_SECRET` 格式正确；确认 Bot 是群管理员且有 Manage Topics 权限。
+- **话题创建失败**：Bot 不是管理员，或缺 Manage Topics 权限。
+- **置顶失败**：Bot 缺 Pin Messages 权限。
+- **验证链接显示 pages.dev**：`PUBLIC_ORIGIN` 没配或配错，改好后重新部署并访问 `/registerWebhook`。
+- **Turnstile 加载不出来**：Turnstile 里配置的域名要和 `PUBLIC_ORIGIN` 完全一致。
+- **管理端点 401**：`X-Admin-Key` 头和 `SHARED_SECRET` 不一致，注意前后空格。
+- **`/verify` 报 Token is invalid**：`SHARED_SECRET` 不一致（改了没重新部署，或 Production/Preview 不一致）。让用户重新触发验证。
+- **`/registerWebhook` 返回 429**：Telegram 限流，等 `retry_after` 秒后重试。
+- **D1 报 table not found**：访问一次 `/checkTables` 触发建表。
 
 ---
 
 ## 安全建议
 
-1. **`SHARED_SECRET` 必须用 `openssl rand -hex 32` 生成**，只允许 `[A-Za-z0-9_-]`，长度 1–256。**不要用 base64**。
-2. **`SHARED_SECRET` 一旦确定后不要轻易更换**，换了会同时导致验证 token 失效、webhook 失效、管理端点凭据变更。
-3. **管理端点优先用 `X-Admin-Key` 请求头**，避免 `?key=` 走 URL 泄露到日志、浏览器历史、Referer。
-4. **Bot Token 泄漏**立即去 BotFather `/revoke` 重置。
-5. **D1 数据库**只绑定到这个 Pages 项目，不要外借。
-6. **Turnstile Widget** 限制域名，不要用 `*`。
-7. **预览环境**也要配齐环境变量，否则 PR 部署会失败。
-8. **不要**在前端页面输出 `SHARED_SECRET`。
-9. **所有者 ID**（`OWNER_ID`）填对，避免自己账户走完整验证流程。
-10. **共享密钥的代价**：`SHARED_SECRET` 一钥三用，任一入口泄露都会连锁失守。若条件允许，建议拆成三个独立密钥（`WEBHOOK_SECRET` / `ADMIN_SECRET` / `VERIFY_SECRET`），实现最小权限隔离。
-11. **定期检查 Cloudflare 访问日志**，关注 `/checkTables` 等管理端点是否有异常访问。
-12. **怀疑泄露时的应急流程**：
-    1. 立即换新 `SHARED_SECRET`
-    2. 用带鉴权的方式访问 `/registerWebhook` 重设 webhook
-    3. 所有旧验证 token 自动失效，用户会重新验证
-    4. 检查 `user_states` 表是否有异常已验证记录
+1. `SHARED_SECRET` 用 `openssl rand -hex 32`，不要用 base64。
+2. 管理端点优先用 `X-Admin-Key` 请求头，不要 `?key=` 走 URL。
+3. Bot Token 泄露立即去 BotFather `/revoke` 重置。
+4. Turnstile Widget 限制域名，不要用 `*`。
+5. 不要在前端页面输出 `SHARED_SECRET`。
+6. 怀疑泄露：换 `SHARED_SECRET` → 重新部署 → `/registerWebhook` 重设。
 
 ---
 
 ## 致谢
 
-本项目在设计和实现过程中参考了以下开源项目的代码与思路：
-
-| 项目 | 作者 | 仓库地址 |
+| 项目 | 作者 | 仓库 |
 |---|---|---|
-| Minigram（原作者） | oldfriendme | https://github.com/oldfriendme/Minigram |
+| Minigram | oldfriendme | https://github.com/oldfriendme/Minigram |
 | ctt | iawooo | https://github.com/iawooo/ctt |
-
-感谢以上项目的开源贡献。
-
----
-
-## 相关链接
-
-- [Cloudflare Pages Functions](https://developers.cloudflare.com/pages/functions/)
-- [Cloudflare D1](https://developers.cloudflare.com/d1/)
-- [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/)
-- [Telegram Bot API](https://core.telegram.org/bots/api)
-- [Telegram Bot API - setWebhook (secret_token)](https://core.telegram.org/bots/api#setwebhook)
-- [Telegram WebApp](https://core.telegram.org/bots/webapps)
 
 ---
 

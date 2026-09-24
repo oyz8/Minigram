@@ -1,131 +1,20 @@
 # ============================================================
 # Cloudflare Pages 响应头配置
 # 放置位置: public/_headers
-# 说明: 仅作用于静态资源请求；Functions 路由(/verify /webhook 等)不经过此处
+# 说明: 仅作用于静态资源；Functions 路由(/verify /webhook 等)不经过此处
 # ============================================================
 
-# ---------- 全局安全头（所有路径） ----------
+# 全局安全头（所有静态资源）
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
-  X-Frame-Options: SAMEORIGIN
+  Content-Security-Policy: frame-ancestors 'self' https://web.telegram.org https://telegram.org
 
-# ---------- 静态 CDN 资源：长缓存 + 跨域 + 防嗅探 ----------
-# 图片
-/*.gif
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
+# 首页说明页：完全自包含，无外部字体/脚本/图片，用最严格策略
+/
+  Content-Security-Policy: default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
-/*.png
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.jpg
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.jpeg
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.webp
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.svg
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.ico
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-# 字体
-/*.woff
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.woff2
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.ttf
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.otf
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-# 样式 / 脚本
-/*.css
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.js
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.mjs
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-# 媒体
-/*.mp4
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.webm
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/*.mp3
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-# 数据文件
-/*.json
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-# ---------- 目录式匹配（如 /assets/* 这类子目录） ----------
-/assets/*
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-/static/*
-  Cache-Control: public, max-age=2592000, immutable
-  X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-# ---------- 特定资源：本项目 robot.gif ----------
+# 验证页头像：长缓存
 /robot.gif
   Cache-Control: public, max-age=2592000, immutable
   X-Content-Type-Options: nosniff
-  Access-Control-Allow-Origin: *
-
-# ---------- 不要缓存的入口（防御性写法，Functions 路由其实不走这里） ----------
-/verify*
-  Cache-Control: no-store
-
-/webhook*
-  Cache-Control: no-store
