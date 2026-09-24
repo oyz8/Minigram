@@ -46,7 +46,6 @@
 ```bash
 # ===== Telegram =====
 BOT_TOKEN_ENV                  # Bot Token（从 @BotFather 获取）
-BOT_USERNAME                   # Bot 用户名（不带 @）
 GROUP_ID_ENV                   # 群组 ID（-100 开头）
 OWNER_ID                       # 你自己的 Telegram User ID
 
@@ -73,7 +72,6 @@ BOT_SHORT_DESCRIPTION          # Bot 简介文案（可选，默认有值）
 | 变量名 | 必填 | 说明 |
 |---|---|---|
 | `BOT_TOKEN_ENV` | ✅ | Telegram Bot Token |
-| `BOT_USERNAME` | ✅ | Bot 用户名，不含 `@` |
 | `GROUP_ID_ENV` | ✅ | 群组 ID，`-100` 开头的负数 |
 | `OWNER_ID` | ✅ | 机器人所有者 User ID |
 | `CAPTCHA_SECRET_KEY` | ✅ | Turnstile 密钥 |
@@ -104,8 +102,6 @@ BOT_SHORT_DESCRIPTION          # Bot 简介文案（可选，默认有值）
 → 输入 Bot 用户名（必须以 bot 结尾）
 → 获得 Token，格式：123456789:ABCDEFGHIKabcnopqrstuvwxyzA
 ```
-
-同时记录 Bot 用户名（不含 `@`），如 `MyPrivateBot`。
 
 ### 群组 ID
 
