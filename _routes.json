@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "include": ["/webhook", "/verify", "/registerWebhook", "/unRegisterWebhook", "/checkTables"],
+  "exclude": ["/robot.gif"]
+}
