@@ -179,6 +179,7 @@ function renderVerifyPage(token, env) {
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>身份验证</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='24' y2='24' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0%25' stop-color='%2314b8a6'/%3E%3Cstop offset='100%25' stop-color='%230891b2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='24' height='24' rx='6' ry='6' fill='url(%23g)'/%3E%3Cpath d='M6 8h12v7H10l-4 4z' fill='none' stroke='%23fff' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E" />
 <script>(function(){try{var d=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}})();</script>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
@@ -214,7 +215,6 @@ function renderVerifyPage(token, env) {
   --avatar-bg:#0f172a;
 }
 html{height:100%}
-/* 关键: 不再固定 590px, 用 min-height 撑满视口, 避免背景被截断 */
 body{
   min-height:100vh;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
@@ -226,7 +226,6 @@ body{
   -webkit-font-smoothing:antialiased;
   transition:color .3s;
 }
-/* 固定全屏渐变背景, 铺满整个视口 (含滚动条区域), 彻底消除分层 */
 body::before{
   content:'';
   position:fixed;
@@ -240,7 +239,6 @@ body::before{
   transition:background-color .3s;
   pointer-events:none;
 }
-/* 浮动光斑 (固定定位, 跟随视口) */
 .orb{
   position:fixed;border-radius:50%;pointer-events:none;
   filter:blur(46px);opacity:.55;z-index:-1;
@@ -255,7 +253,6 @@ body::before{
   background:radial-gradient(circle,rgba(8,145,178,.45),transparent 70%);
   animation:float 13s ease-in-out infinite reverse;
 }
-/* 卡片 */
 .card{
   position:relative;z-index:1;
   width:100%;max-width:340px;
@@ -267,12 +264,11 @@ body::before{
   display:flex;flex-direction:column;align-items:center;gap:12px;
   animation:cardIn .5s cubic-bezier(.22,.8,.32,1) both;
 }
-/* 头像区域: 用 contain 保证 GIF 完整显示, 不裁剪任何一边 */
 .avatar-wrap{
   position:relative;
   width:100%;
   max-width:260px;
-  aspect-ratio:5 / 4;        /* 略高的比例, 让 GIF 完整放下 */
+  aspect-ratio:5 / 4;
   flex:none;
   border-radius:16px;
   overflow:hidden;
@@ -280,7 +276,7 @@ body::before{
 }
 .avatar{
   width:100%;height:100%;
-  object-fit:contain;         /* 关键: 完整显示, 不裁剪 */
+  object-fit:contain;
   object-position:center;
   display:block;
 }
@@ -292,7 +288,6 @@ body::before{
   font-size:.78rem;color:var(--muted);line-height:1.5;
   text-align:center;margin-top:-6px;
 }
-/* Turnstile */
 .cf-wrap{
   display:flex;align-items:center;justify-content:center;
   min-height:65px;width:100%;
@@ -313,13 +308,46 @@ body::before{
 #status[data-clickable="1"]{cursor:pointer;user-select:none}
 #status[data-clickable="1"]:hover{transform:translateY(-1px);border-color:var(--err-bd)}
 #status[data-clickable="1"]:active{transform:scale(.985)}
+/* SVG spinner —— 用 SVG 描边圆弧, 兼容性比 border-top 方案更好 */
 .spinner{
-  flex:none;width:14px;height:14px;border-radius:50%;
-  border:2px solid var(--track);border-top-color:var(--primary);
+  flex:none;width:15px;height:15px;display:block;
+  color:var(--primary);
   animation:spin .7s linear infinite;
+  transform-origin:50% 50%;
+  will-change:transform;
 }
-.icon-success{display:inline-block;animation:pop .42s cubic-bezier(.22,1.2,.4,1)}
-/* 底部标识 */
+/* SVG 通用小图标 (时钟 / 叉号 / 对勾) */
+.icon{
+  width:14px;height:14px;flex:none;
+  display:inline-block;vertical-align:-2px;
+  margin-right:4px;
+  stroke:currentColor;fill:none;
+  stroke-width:2;stroke-linecap:round;stroke-linejoin:round;
+}
+/* 成功图标外层 (保留弹出动画) */
+.icon-success{
+  display:inline-block;
+  margin-right:4px;
+  animation:pop .42s cubic-bezier(.22,1.2,.4,1);
+}
+.icon-success .icon{margin-right:0;vertical-align:-2px}
+@keyframes spin{
+  from{transform:rotate(0deg)}
+  to{transform:rotate(360deg)}
+}
+@keyframes pop{
+  0%{transform:scale(0)}
+  70%{transform:scale(1.18)}
+  100%{transform:scale(1)}
+}
+@keyframes cardIn{
+  from{opacity:0;transform:translateY(14px) scale(.98)}
+  to{opacity:1;transform:none}
+}
+@keyframes float{
+  0%,100%{transform:translate(0,0)}
+  50%{transform:translate(12px,-16px)}
+}
 .footer-tip{
   position:relative;z-index:1;
   display:flex;align-items:center;justify-content:center;gap:8px;
@@ -328,12 +356,9 @@ body::before{
 .footer-tip::before,.footer-tip::after{
   content:'';width:22px;height:1px;background:currentColor;opacity:.35;
 }
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes pop{0%{transform:scale(0)}70%{transform:scale(1.18)}100%{transform:scale(1)}}
-@keyframes cardIn{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
-@keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(12px,-16px)}}
+/* 减少动态效果: 只关掉装饰性动画, 保留 spinner 旋转 (状态指示) */
 @media (prefers-reduced-motion:reduce){
-  *{animation:none!important;transition:none!important}
+  .orb,.card,.icon-success{animation:none!important}
 }
 @media (max-height:600px){
   .avatar-wrap{max-width:220px;aspect-ratio:16 / 10}
@@ -367,7 +392,10 @@ body::before{
   </div>
 
   <div id="status" data-clickable="0">
-    <span class="spinner"></span>
+    <svg class="spinner" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.5" opacity="0.22"/>
+      <path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>
     <span id="statusText">请完成上方人机验证…</span>
   </div>
 </main>
@@ -376,6 +404,32 @@ body::before{
 
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script>
 <script>
+/* ---------- 内联 SVG 图标 ---------- */
+var SPINNER_SVG =
+  '<svg class="spinner" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.5" opacity="0.22"/>' +
+    '<path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>' +
+  '</svg>';
+
+var ICON_CLOCK =
+  '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="9"/>' +
+    '<polyline points="12 7 12 12 15 14"/>' +
+  '</svg>';
+
+var ICON_X =
+  '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="9"/>' +
+    '<line x1="9" y1="9" x2="15" y2="15"/>' +
+    '<line x1="15" y1="9" x2="9" y2="15"/>' +
+  '</svg>';
+
+var ICON_CHECK =
+  '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="9"/>' +
+    '<polyline points="8 12 11 15 16 9"/>' +
+  '</svg>';
+
 let isDone = false;
 if (window.Telegram && window.Telegram.WebApp) {
   try { window.Telegram.WebApp.ready(); window.Telegram.WebApp.expand(); } catch(e){}
@@ -395,14 +449,14 @@ function onStatusClick() {
 setTimeout(function () {
   if (!isDone) {
     const el = document.getElementById('status');
-    if (el.dataset.clickable !== '1') setStatus('⏱ 卡住了？点这里刷新重试', 'error', true);
+    if (el.dataset.clickable !== '1') setStatus(ICON_CLOCK + '卡住了？点这里刷新重试', 'error', true);
   }
 }, 25000);
 function onTurnstileError() {
-  if (!isDone) setStatus('❌ 验证加载失败，点这里刷新重试', 'error', true);
+  if (!isDone) setStatus(ICON_X + '验证加载失败，点这里刷新重试', 'error', true);
 }
 function onTurnstileExpired() {
-  if (!isDone) setStatus('⏱ 验证过期了，点这里刷新重试', 'error', true);
+  if (!isDone) setStatus(ICON_CLOCK + '验证过期了，点这里刷新重试', 'error', true);
 }
 function tryClose() {
   try {
@@ -414,7 +468,7 @@ function tryClose() {
 function onTurnstileSuccess(turnstileToken) {
   setStatus('验证中，请稍候…', '', false);
   const el = document.getElementById('status');
-  if (!el.querySelector('.spinner')) el.insertAdjacentHTML('afterbegin', '<span class="spinner"></span>');
+  if (!el.querySelector('.spinner')) el.insertAdjacentHTML('afterbegin', SPINNER_SVG);
 
   const fd = new FormData();
   fd.append('cf-turnstile-response', turnstileToken);
@@ -423,19 +477,20 @@ function onTurnstileSuccess(turnstileToken) {
     .then(r => r.json())
     .then(data => {
       if (!data.ok) {
-        setStatus('❌ ' + (data.error || '验证失败') + '，点这里刷新重试', 'error', true);
+        setStatus(ICON_X + (data.error || '验证失败') + '，点这里刷新重试', 'error', true);
         return;
       }
       isDone = true;
-      setStatus('<span class="icon-success">✅</span> 验证成功！', 'success', false);
+      setStatus('<span class="icon-success">' + ICON_CHECK + '</span>验证成功！', 'success', false);
       setTimeout(() => {
         if (!tryClose()) {
-          setStatus('<span class="icon-success">✅</span> 验证成功！请返回 Telegram 查看', 'success', false);
+          setStatus('<span class="icon-success">' + ICON_CHECK + '</span>验证成功！请返回 Telegram 查看', 'success', false);
         }
       }, 120);
     })
-    .catch(() => setStatus('❌ 网络错误，点这里刷新重试', 'error', true));
+    .catch(() => setStatus(ICON_X + '网络错误，点这里刷新重试', 'error', true));
 }
+document.getElementById('status').addEventListener('click', onStatusClick);
 </script>
 </body></html>`;
 }
