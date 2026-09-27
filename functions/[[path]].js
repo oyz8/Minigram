@@ -170,71 +170,210 @@ function clampText(text) {
 }
 
 /* ========================== 5. 验证页面 HTML ========================== */
-const htmlHead = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>身份验证</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<style>
-*{box-sizing:border-box;margin:0;padding:0;}
-html, body{height:590px;overflow:hidden;}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-     background:#fff;display:flex;flex-direction:column;align-items:center;
-     padding:16px 0 60px 0;}
-.content{width:100%;max-width:100%;padding:0 12px;display:flex;flex-direction:column;
-         align-items:center;flex:1;justify-content:center;gap:10px;}
-.avatar{width:300px;max-width:100%;max-height:250px;height:auto;border-radius:12px;
-        object-fit:contain;display:block;margin:0 auto;}
-.logo-wrap{display:flex;flex-direction:column;align-items:center;gap:4px;}
-.card-title{font-size:1.1rem;font-weight:700;color:#1a1a2e;text-align:center;margin:0;}
-.cf-wrap{display:flex;justify-content:center;margin-bottom:2px;}
-.cf-turnstile{border-radius:12px!important;}
-#status{text-align:center;font-size:.8rem;color:#6b7280;background:#f9fafb;
-  border:1px solid #e5e7eb;border-radius:12px;padding:6px 14px;margin:0 auto;
-  min-height:32px;display:flex;align-items:center;justify-content:center;gap:6px;
-  transition:all .2s;width:fit-content;max-width:100%;}
-#status.success{color:#059669;background:#ecfdf5;border-color:#a7f3d0;}
-#status.error{color:#dc2626;background:#fef2f2;border-color:#fecaca;}
-#status[data-clickable="1"]{cursor:pointer;user-select:none;}
-#status[data-clickable="1"]:hover{background:#fee2e2;border-color:#fca5a5;}
-#status[data-clickable="1"]:active{transform:scale(.98);}
-.footer-tip{text-align:center;font-size:.65rem;color:#9ca3af;display:flex;
-  align-items:center;justify-content:center;gap:6px;width:100%;padding:0 12px;}
-.footer-tip::before,.footer-tip::after{content:'';width:30px;height:1px;
-  background:#e5e7eb;flex:none;}
-@keyframes spin{to{transform:rotate(360deg)}}
-.spinner{display:inline-block;width:14px;height:14px;border:2px solid #d1d5db;
-  border-top-color:#4f6ef7;border-radius:50%;animation:spin .7s linear infinite;
-  vertical-align:middle;}
-@keyframes pop{0%{transform:scale(0)}70%{transform:scale(1.15)}100%{transform:scale(1)}}
-.icon-success{display:inline-block;animation:pop .4s ease;}
-</style></head><body>`;
-
 function renderVerifyPage(token, env) {
   const eToken = encodeURIComponent(token);
   const siteKey = (env.CAPTCHA_SITE_KEY || '').replace(/"/g, '');
-  return htmlHead + `
-<div class="content">
-  <div class="logo-wrap">
+  return `<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>身份验证</title>
+<script>(function(){try{var d=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}})();</script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  color-scheme:light;
+  --bg-1:#f8fafc;--bg-2:#e9eef5;
+  --panel:#ffffff;
+  --panel-border:rgba(15,23,42,.06);
+  --text:#0f172a;--muted:#64748b;
+  --primary:#0f766e;--primary-2:#0891b2;
+  --primary-soft:rgba(15,118,110,.14);
+  --shadow:0 12px 36px rgba(15,23,42,.09),0 2px 8px rgba(15,23,42,.04);
+  --ok:#047857;--ok-bg:rgba(5,150,105,.10);--ok-bd:rgba(5,150,105,.28);
+  --err:#dc2626;--err-bg:rgba(220,38,38,.08);--err-bd:rgba(220,38,38,.25);
+  --track:rgba(100,116,139,.22);
+  --chip:rgba(100,116,139,.08);
+  --avatar-bg:#ffffff;
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg-1:#0b0f19;--bg-2:#030712;
+  --panel:#1e293b;
+  --panel-border:rgba(255,255,255,.09);
+  --text:#f1f5f9;--muted:#94a3b8;
+  --primary:#14b8a6;--primary-2:#22d3ee;
+  --primary-soft:rgba(20,184,166,.16);
+  --shadow:0 14px 40px rgba(0,0,0,.5),0 2px 10px rgba(0,0,0,.3);
+  --ok:#34d399;--ok-bg:rgba(52,211,153,.12);--ok-bd:rgba(52,211,153,.30);
+  --err:#f87171;--err-bg:rgba(248,113,113,.12);--err-bd:rgba(248,113,113,.30);
+  --track:rgba(148,163,184,.25);
+  --chip:rgba(148,163,184,.10);
+  --avatar-bg:#0f172a;
+}
+html{height:100%}
+/* 关键: 不再固定 590px, 用 min-height 撑满视口, 避免背景被截断 */
+body{
+  min-height:100vh;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  color:var(--text);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;padding:22px 16px 30px;
+  position:relative;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+  transition:color .3s;
+}
+/* 固定全屏渐变背景, 铺满整个视口 (含滚动条区域), 彻底消除分层 */
+body::before{
+  content:'';
+  position:fixed;
+  inset:0;
+  z-index:-2;
+  background-color:var(--bg-1);
+  background-image:
+    radial-gradient(90% 70% at 8% 0%,var(--primary-soft),transparent 55%),
+    radial-gradient(80% 65% at 100% 6%,rgba(8,145,178,.14),transparent 58%),
+    linear-gradient(180deg,var(--bg-1),var(--bg-2));
+  transition:background-color .3s;
+  pointer-events:none;
+}
+/* 浮动光斑 (固定定位, 跟随视口) */
+.orb{
+  position:fixed;border-radius:50%;pointer-events:none;
+  filter:blur(46px);opacity:.55;z-index:-1;
+}
+.orb-a{
+  width:220px;height:220px;top:-70px;left:-60px;
+  background:radial-gradient(circle,rgba(20,184,166,.55),transparent 70%);
+  animation:float 11s ease-in-out infinite;
+}
+.orb-b{
+  width:260px;height:260px;bottom:-100px;right:-80px;
+  background:radial-gradient(circle,rgba(8,145,178,.45),transparent 70%);
+  animation:float 13s ease-in-out infinite reverse;
+}
+/* 卡片 */
+.card{
+  position:relative;z-index:1;
+  width:100%;max-width:340px;
+  padding:20px 20px 18px;
+  border-radius:22px;
+  background:var(--panel);
+  border:1px solid var(--panel-border);
+  box-shadow:var(--shadow);
+  display:flex;flex-direction:column;align-items:center;gap:12px;
+  animation:cardIn .5s cubic-bezier(.22,.8,.32,1) both;
+}
+/* 头像区域: 用 contain 保证 GIF 完整显示, 不裁剪任何一边 */
+.avatar-wrap{
+  position:relative;
+  width:100%;
+  max-width:260px;
+  aspect-ratio:5 / 4;        /* 略高的比例, 让 GIF 完整放下 */
+  flex:none;
+  border-radius:16px;
+  overflow:hidden;
+  background:var(--avatar-bg);
+}
+.avatar{
+  width:100%;height:100%;
+  object-fit:contain;         /* 关键: 完整显示, 不裁剪 */
+  object-position:center;
+  display:block;
+}
+.title{
+  font-size:1.22rem;font-weight:800;
+  letter-spacing:-.02em;line-height:1.25;text-align:center;
+}
+.desc{
+  font-size:.78rem;color:var(--muted);line-height:1.5;
+  text-align:center;margin-top:-6px;
+}
+/* Turnstile */
+.cf-wrap{
+  display:flex;align-items:center;justify-content:center;
+  min-height:65px;width:100%;
+}
+.cf-turnstile{border-radius:12px!important}
+/* 状态条 */
+#status{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;min-height:40px;padding:9px 14px;
+  border-radius:12px;border:1px solid var(--panel-border);
+  background:var(--chip);
+  font-size:.76rem;font-weight:500;line-height:1.45;color:var(--muted);
+  text-align:center;
+  transition:background .22s,border-color .22s,color .22s,transform .18s;
+}
+#status.success{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-bd)}
+#status.error{color:var(--err);background:var(--err-bg);border-color:var(--err-bd)}
+#status[data-clickable="1"]{cursor:pointer;user-select:none}
+#status[data-clickable="1"]:hover{transform:translateY(-1px);border-color:var(--err-bd)}
+#status[data-clickable="1"]:active{transform:scale(.985)}
+.spinner{
+  flex:none;width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--track);border-top-color:var(--primary);
+  animation:spin .7s linear infinite;
+}
+.icon-success{display:inline-block;animation:pop .42s cubic-bezier(.22,1.2,.4,1)}
+/* 底部标识 */
+.footer-tip{
+  position:relative;z-index:1;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  font-size:.6rem;color:var(--muted);opacity:.8;letter-spacing:.02em;
+}
+.footer-tip::before,.footer-tip::after{
+  content:'';width:22px;height:1px;background:currentColor;opacity:.35;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pop{0%{transform:scale(0)}70%{transform:scale(1.18)}100%{transform:scale(1)}}
+@keyframes cardIn{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(12px,-16px)}}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+}
+@media (max-height:600px){
+  .avatar-wrap{max-width:220px;aspect-ratio:16 / 10}
+  .card{padding:16px 18px 14px;gap:10px}
+  .title{font-size:1.1rem}
+}
+</style>
+</head>
+<body>
+<div class="orb orb-a"></div>
+<div class="orb orb-b"></div>
+
+<main class="card">
+  <div class="avatar-wrap">
     <img src="/robot.gif" alt="Bot Avatar" class="avatar"/>
-    <div class="card-title">身份验证</div>
   </div>
+  <h1 class="title">身份验证</h1>
+  <p class="desc">完成人机验证后即可开始对话</p>
+
   <input type="hidden" id="token" value="${eToken}">
+
   <div class="cf-wrap">
     <div class="cf-turnstile"
          data-sitekey="${siteKey}"
          data-action="verify"
-         data-theme="light"
+         data-theme="auto"
          data-callback="onTurnstileSuccess"
          data-error-callback="onTurnstileError"
          data-expired-callback="onTurnstileExpired"
          data-timeout-callback="onTurnstileError"></div>
   </div>
-  <div id="status" onclick="onStatusClick()">
+
+  <div id="status" data-clickable="0">
     <span class="spinner"></span>
-    <span id="statusText">请完成上方人机验证...</span>
+    <span id="statusText">请完成上方人机验证…</span>
   </div>
-</div>
+</main>
+
 <div class="footer-tip">Powered by Cloudflare Turnstile</div>
+
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script>
 <script>
 let isDone = false;
@@ -273,9 +412,10 @@ function tryClose() {
   return false;
 }
 function onTurnstileSuccess(turnstileToken) {
+  setStatus('验证中，请稍候…', '', false);
   const el = document.getElementById('status');
   if (!el.querySelector('.spinner')) el.insertAdjacentHTML('afterbegin', '<span class="spinner"></span>');
-  setStatus('验证中，请稍候...', '', false);
+
   const fd = new FormData();
   fd.append('cf-turnstile-response', turnstileToken);
   fd.append('token', decodeURIComponent(document.getElementById('token').value));
@@ -289,12 +429,15 @@ function onTurnstileSuccess(turnstileToken) {
       isDone = true;
       setStatus('<span class="icon-success">✅</span> 验证成功！', 'success', false);
       setTimeout(() => {
-        if (!tryClose()) setStatus('<span class="icon-success">✅</span> 验证成功！请返回 Telegram 查看', 'success', false);
+        if (!tryClose()) {
+          setStatus('<span class="icon-success">✅</span> 验证成功！请返回 Telegram 查看', 'success', false);
+        }
       }, 120);
     })
     .catch(() => setStatus('❌ 网络错误，点这里刷新重试', 'error', true));
 }
-</script></body></html>`;
+</script>
+</body></html>`;
 }
 
 /* ========================== 6. 主入口 ========================== */
