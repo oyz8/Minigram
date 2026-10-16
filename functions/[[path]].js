@@ -21,7 +21,6 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'strict-origin-when-cross-origin'
 };
 
-// 放宽 frame-ancestors，解决移动端 WebView 加载瞬间被拦截收回的问题
 const VERIFY_PAGE_CSP =
   "default-src 'self'; " +
   "script-src 'self' 'unsafe-inline' https://telegram.org https://challenges.cloudflare.com; " +
@@ -30,10 +29,10 @@ const VERIFY_PAGE_CSP =
   "frame-src https://challenges.cloudflare.com; " +
   "connect-src 'self' https://challenges.cloudflare.com; " +
   "base-uri 'none'; form-action 'self'; " +
-  "frame-ancestors *;"; 
+  "frame-ancestors 'self' https://web.telegram.org https://telegram.org;";
 
-const VERIFY_TOKEN_TTL = 60 * 60;
-const VERIFY_CODE_TTL  = 5 * 60;
+const VERIFY_TOKEN_TTL = 60 * 60;  // token 自身有效期 1 小时
+const VERIFY_CODE_TTL  = 5 * 60;   // 单次验证窗口 5 分钟
 
 const SHARED_SECRET_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 
@@ -208,17 +207,15 @@ function renderVerifyPage(token, env) {
   --chip:rgba(148,163,184,.10);
   --avatar-bg:#0f172a;
 }
-/* 修正移动端 WebView 高度计算 */
-html{height:100%;}
+html{height:100%}
 body{
-  height:100%;
-  min-height:100%;
+  min-height:100vh;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
   color:var(--text);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:14px;padding:22px 16px 30px;
   position:relative;
-  overflow-y:auto;
+  overflow-x:hidden;
   -webkit-font-smoothing:antialiased;
   transition:color .3s;
 }
@@ -395,7 +392,6 @@ body::before{
 
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script>
 <script>
-/* ---------- 内联 SVG 图标 ---------- */
 var SPINNER_SVG =
   '<svg class="spinner" viewBox="0 0 24 24" aria-hidden="true">' +
     '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.5" opacity="0.22"/>' +
@@ -473,14 +469,11 @@ function onTurnstileSuccess(turnstileToken) {
       }
       isDone = true;
       setStatus('<span class="icon-success">' + ICON_CHECK + '</span>验证成功！', 'success', false);
-      
-      // 移动端闪退修复：验证成功后延迟关闭，给 WebView 缓冲时间
       setTimeout(() => {
-        if (!isDone) return;
         if (!tryClose()) {
           setStatus('<span class="icon-success">' + ICON_CHECK + '</span>验证成功！请返回 Telegram 查看', 'success', false);
         }
-      }, 800);
+      }, 120);
     })
     .catch(() => setStatus(ICON_X + '网络错误，点这里刷新重试', 'error', true));
 }
@@ -492,9 +485,9 @@ document.getElementById('status').addEventListener('click', onStatusClick);
 /* ========================== 6. 主入口 ========================== */
 export async function onRequest(context) {
   const { request, env } = context;
+
   const url = new URL(request.url);
 
-  // 根路径: 交给静态资源
   if (url.pathname === '/' && request.method === 'GET') {
     if (env.ASSETS) return env.ASSETS.fetch(request);
     return new Response(
@@ -503,7 +496,6 @@ export async function onRequest(context) {
     );
   }
 
-  // 必需环境变量校验
   const missing = REQUIRED_ENV.filter(k => !env[k]);
   if (missing.length) {
     return new Response('Missing required env vars: ' + missing.join(', '), { status: 500 });
@@ -541,9 +533,6 @@ export async function onRequest(context) {
     context.waitUntil(runBackgroundInit(request, env));
   }
 
-  // ============================================================
-  //  路由
-  // ============================================================
   if (url.pathname === '/verify') {
     if (request.method === 'POST') return await handleVerifyPost(request, env, context);
     return await handleVerifyGet(request, env);
@@ -603,9 +592,6 @@ export async function onRequest(context) {
   if (env.ASSETS) return env.ASSETS.fetch(request);
   return new Response('Not Found', { status: 404 });
 
-  // ============================================================
-  //  /verify 处理器
-  // ============================================================
   async function handleVerifyGet(request, env) {
     const u = new URL(request.url);
     const token = u.searchParams.get('token');
@@ -727,9 +713,6 @@ export async function onRequest(context) {
     return jsonResp({ ok: true });
   }
 
-  // ============================================================
-  //  初始化 / 权限 / Bot 资料
-  // ============================================================
   async function runBackgroundInit(req, env) {
     const branch = env.CF_PAGES_BRANCH;
     const isProduction = !branch || branch === 'main' || branch === 'production';
@@ -933,9 +916,6 @@ export async function onRequest(context) {
     }
   }
 
-  // ============================================================
-  //  Telegram 更新
-  // ============================================================
   async function handleUpdate(update) {
     if (update.message) {
       const key = `${update.message.chat.id}:${update.message.message_id}`;
@@ -1160,7 +1140,7 @@ export async function onRequest(context) {
         await sendMessageToUser(chatId, "您发送 /start 过于频繁，请稍后再试。");
         return;
       }
-      await sendMessageToUser(chatId, '🙃 行了，发吧。');
+      await sendMessageToUser(chatId, '🙃 行吧，发吧。');
       const ui = await getUserInfo(chatId);
       await ensureUserTopic(chatId, ui);
       return;
@@ -1217,7 +1197,6 @@ export async function onRequest(context) {
       await env.D1.prepare('UPDATE user_states SET is_verifying=?, code_expiry=? WHERE chat_id=?')
         .bind(true, codeExpiry, chatId).run();
 
-      // 改用 inline_keyboard，解决移动端需要点红箭头才能看到按钮的问题
       await fetchWithRetry(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1230,6 +1209,8 @@ export async function onRequest(context) {
           }
         })
       });
+      // ======================================================
+
     } catch (e) {
       console.error('handleVerification failed:', e);
       await env.D1.prepare('UPDATE user_states SET is_verifying = FALSE WHERE chat_id = ?').bind(chatId).run();
@@ -1244,11 +1225,9 @@ export async function onRequest(context) {
     const verifyLink = `${origin}/verify?token=${encodeURIComponent(token)}`;
     const nowSec = Math.floor(Date.now() / 1000);
     const codeExpiry = nowSec + VERIFY_CODE_TTL;
-    
     await env.D1.prepare('UPDATE user_states SET is_verifying = TRUE, code_expiry = ? WHERE chat_id = ?')
       .bind(codeExpiry, chatId).run();
 
-    // 改用 inline_keyboard
     await fetchWithRetry(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1261,11 +1240,9 @@ export async function onRequest(context) {
         }
       })
     });
+    // ============================================================================
   }
 
-  // ============================================================
-  //  话题 / 消息发送
-  // ============================================================
   async function ensureUserTopic(chatId, userInfo) {
     const prev = topicCreationLocks.get(chatId) || Promise.resolve();
 
@@ -1319,7 +1296,7 @@ export async function onRequest(context) {
         { text: '🗑 删除用户', callback_data: `delete_user_${privateChatId}` }
       ],
       [
-        { text: '⭐️ 项目地址 ⭐️', url: 'https://github.com/oyz8/Minigram' }
+        { text: '➡️ 项目地址', url: 'https://github.com/oyz8/Minigram' }
       ]
     ];
 
@@ -1737,7 +1714,7 @@ export async function onRequest(context) {
         try {
           const clone = response.clone();
           detail = (await clone.text()).slice(0, 500);
-        } catch (_) { }
+        } catch (_) { /* ignore */ }
         throw new Error(`HTTP ${response.status}${detail ? ': ' + detail : ''}`);
       } catch (e) {
         if (i === retries - 1) throw e;
