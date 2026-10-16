@@ -11,13 +11,11 @@ const topicCreationLocks = new Map();
 const settingsCache = new Map([['verification_enabled', null]]);
 
 const MAX_PROCESSED_SET_SIZE = 10000;
-const MAX_TEXT_LENGTH = 4000;         // 留出昵称前缀空间
+const MAX_TEXT_LENGTH = 4000;
 const MAX_BLOCKLIST_LINES = 50;
 const CLEANUP_BATCH_SIZE = 100;
 
 /* ========================== 2. 常量 ========================== */
-// 注意: 不再设置 X-Frame-Options, 改用 CSP frame-ancestors,
-//       否则 Telegram Web 版的 Mini App iframe 会被拦截.
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin'
@@ -31,7 +29,7 @@ const VERIFY_PAGE_CSP =
   "frame-src https://challenges.cloudflare.com; " +
   "connect-src 'self' https://challenges.cloudflare.com; " +
   "base-uri 'none'; form-action 'self'; " +
-  "frame-ancestors 'self' https://web.telegram.org https://telegram.org;";
+  "frame-ancestors *;"; 
 
 const VERIFY_TOKEN_TTL = 60 * 60;  // token 自身有效期 1 小时
 const VERIFY_CODE_TTL  = 5 * 60;   // 单次验证窗口 5 分钟
@@ -83,7 +81,6 @@ function getOrigin(request, env) {
   return new URL(request.url).origin;
 }
 
-// 恒定时间字符串比较, 防止密钥被逐字符试探
 function timingSafeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (a.length !== b.length) return false;
@@ -104,7 +101,6 @@ async function hmacHex(secret, data) {
   return Array.from(new Uint8Array(sig), b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// token 格式: v1.<chatId>.<exp>.<nonce32hex>.<sig64hex>
 async function createVerifyToken(chatId, env) {
   const exp = Math.floor(Date.now() / 1000) + VERIFY_TOKEN_TTL;
   const nonce = randomHex(32);
@@ -132,9 +128,6 @@ async function parseVerifyToken(token, env) {
   return { chatId, exp: parseInt(expStr, 10), nonce };
 }
 
-// 管理端点鉴权: 仅接受 X-Admin-Key 头
-//   X-Admin-Key: <SHARED_SECRET>
-// 不再接受 ?key=, 避免密钥进入日志/Referer/浏览器历史.
 function requireAdmin(request, env) {
   const expected = env.SHARED_SECRET;
   if (!expected) {
@@ -214,15 +207,17 @@ function renderVerifyPage(token, env) {
   --chip:rgba(148,163,184,.10);
   --avatar-bg:#0f172a;
 }
-html{height:100%}
+
+html{height:100%;}
 body{
-  min-height:100vh;
+  height:100%;
+  min-height:100%;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
   color:var(--text);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:14px;padding:22px 16px 30px;
   position:relative;
-  overflow-x:hidden;
+  overflow-y:auto;
   -webkit-font-smoothing:antialiased;
   transition:color .3s;
 }
@@ -293,7 +288,6 @@ body::before{
   min-height:65px;width:100%;
 }
 .cf-turnstile{border-radius:12px!important}
-/* 状态条 */
 #status{
   display:flex;align-items:center;justify-content:center;gap:8px;
   width:100%;min-height:40px;padding:9px 14px;
@@ -308,7 +302,6 @@ body::before{
 #status[data-clickable="1"]{cursor:pointer;user-select:none}
 #status[data-clickable="1"]:hover{transform:translateY(-1px);border-color:var(--err-bd)}
 #status[data-clickable="1"]:active{transform:scale(.985)}
-/* SVG spinner —— 用 SVG 描边圆弧, 兼容性比 border-top 方案更好 */
 .spinner{
   flex:none;width:15px;height:15px;display:block;
   color:var(--primary);
@@ -316,7 +309,6 @@ body::before{
   transform-origin:50% 50%;
   will-change:transform;
 }
-/* SVG 通用小图标 (时钟 / 叉号 / 对勾) */
 .icon{
   width:14px;height:14px;flex:none;
   display:inline-block;vertical-align:-2px;
@@ -324,7 +316,6 @@ body::before{
   stroke:currentColor;fill:none;
   stroke-width:2;stroke-linecap:round;stroke-linejoin:round;
 }
-/* 成功图标外层 (保留弹出动画) */
 .icon-success{
   display:inline-block;
   margin-right:4px;
@@ -356,7 +347,6 @@ body::before{
 .footer-tip::before,.footer-tip::after{
   content:'';width:22px;height:1px;background:currentColor;opacity:.35;
 }
-/* 减少动态效果: 只关掉装饰性动画, 保留 spinner 旋转 (状态指示) */
 @media (prefers-reduced-motion:reduce){
   .orb,.card,.icon-success{animation:none!important}
 }
@@ -482,11 +472,13 @@ function onTurnstileSuccess(turnstileToken) {
       }
       isDone = true;
       setStatus('<span class="icon-success">' + ICON_CHECK + '</span>验证成功！', 'success', false);
+      
       setTimeout(() => {
+        if (!isDone) return;
         if (!tryClose()) {
           setStatus('<span class="icon-success">' + ICON_CHECK + '</span>验证成功！请返回 Telegram 查看', 'success', false);
         }
-      }, 120);
+      }, 800);
     })
     .catch(() => setStatus(ICON_X + '网络错误，点这里刷新重试', 'error', true));
 }
@@ -498,11 +490,8 @@ document.getElementById('status').addEventListener('click', onStatusClick);
 /* ========================== 6. 主入口 ========================== */
 export async function onRequest(context) {
   const { request, env } = context;
-
   const url = new URL(request.url);
 
-  // 根路径: 交给静态资源 public/index.html, 不依赖 D1 / 环境变量
-  // 即使服务未配置完整, 也能作为"服务是否在线"的落地页
   if (url.pathname === '/' && request.method === 'GET') {
     if (env.ASSETS) return env.ASSETS.fetch(request);
     return new Response(
@@ -511,7 +500,7 @@ export async function onRequest(context) {
     );
   }
 
-  // 必需环境变量校验, 避免后续出现难以定位的 Telegram API 错误
+  // 必需环境变量校验
   const missing = REQUIRED_ENV.filter(k => !env[k]);
   if (missing.length) {
     return new Response('Missing required env vars: ' + missing.join(', '), { status: 500 });
@@ -527,13 +516,12 @@ export async function onRequest(context) {
 
   if (!env.D1) return new Response('Server configuration error: D1 not bound', { status: 500 });
 
-  // ---- 首次初始化: Promise 锁, 并发请求共享同一次建表 ----
   if (!initPromise) {
     initPromise = (async () => {
       try {
         await checkAndRepairTables(env.D1);
       } catch (e) {
-        initPromise = null;  // 允许下次请求重试
+        initPromise = null;
         throw e;
       }
     })();
@@ -559,7 +547,6 @@ export async function onRequest(context) {
   }
 
   if (url.pathname === '/webhook' && request.method === 'POST') {
-    // 用 SHARED_SECRET 作为 Telegram secret_token 校验
     if (!SHARED_SECRET) {
       return new Response('SHARED_SECRET not configured', { status: 500 });
     }
@@ -659,7 +646,6 @@ export async function onRequest(context) {
     if (!captcha) return jsonErr('Captcha missing');
     if (!SHARED_SECRET) return jsonErr('Verification service not configured');
 
-    // 1) Turnstile 校验
     const fd = new FormData();
     fd.append('secret', env.CAPTCHA_SECRET_KEY);
     fd.append('response', captcha);
@@ -675,20 +661,18 @@ export async function onRequest(context) {
     }
     if (!res.success) return jsonErr('Captcha fail');
 
-    // 校验 hostname 与 action, 防止 token 被跨站复用
     if (env.PUBLIC_ORIGIN) {
       try {
         const expectedHost = new URL(env.PUBLIC_ORIGIN).hostname;
         if (res.hostname && res.hostname !== expectedHost) {
           return jsonErr('Captcha hostname mismatch');
         }
-      } catch (e) { /* PUBLIC_ORIGIN 非法已在入口校验过, 这里忽略 */ }
+      } catch (e) { }
     }
     if (res.action && res.action !== 'verify') {
       return jsonErr('Captcha action mismatch');
     }
 
-    // 2) HMAC 签名校验
     const parsed = await parseVerifyToken(token, env);
     if (!parsed) return jsonErr('Token is invalid');
     const { chatId, exp } = parsed;
@@ -696,7 +680,6 @@ export async function onRequest(context) {
     const nowSec = Math.floor(Date.now() / 1000);
     if (nowSec > exp) return jsonErr('Verification token expired');
 
-    // 3) DB 状态校验
     const st = await env.D1.prepare(
       'SELECT is_verifying, code_expiry FROM user_states WHERE chat_id = ?'
     ).bind(chatId).first();
@@ -707,7 +690,6 @@ export async function onRequest(context) {
     }
     if (st.code_expiry && nowSec > st.code_expiry) return jsonErr('Verification expired');
 
-    // 4) 标记为已验证
     const verifiedExpiry = nowSec + 3600 * 24 * 7;
     await env.D1.prepare(
       'UPDATE user_states SET is_verified = TRUE, verified_expiry = ?, is_first_verification = FALSE, is_verifying = FALSE, code_expiry = NULL WHERE chat_id = ?'
@@ -935,7 +917,6 @@ export async function onRequest(context) {
         'SELECT chat_id FROM user_states WHERE code_expiry IS NOT NULL AND code_expiry < ?'
       ).bind(nowSec).all();
       const rows = expired.results || [];
-      // 分批执行, 避免 D1 batch 超限
       for (let i = 0; i < rows.length; i += CLEANUP_BATCH_SIZE) {
         const chunk = rows.slice(i, i + CLEANUP_BATCH_SIZE);
         await d1.batch(chunk.map(({ chat_id }) =>
@@ -1098,7 +1079,6 @@ export async function onRequest(context) {
           return;
         }
 
-        // /admin 命令: 独立处理, 命中失败时给出明确提示, 便于排查
         if (text === '/admin' || text.startsWith('/admin@') || text.startsWith('/admin ')) {
           const privateChatId = await getPrivateChatId(topicId);
           if (!privateChatId) {
@@ -1114,7 +1094,6 @@ export async function onRequest(context) {
           return;
         }
 
-        // 其它群组消息: 转发回用户私聊
         const privateChatId = await getPrivateChatId(topicId);
         if (privateChatId) {
           await forwardMessageToPrivateChat(privateChatId, message);
@@ -1241,9 +1220,9 @@ export async function onRequest(context) {
           chat_id: chatId,
           text: '😮‍💨 先验一下。点下面，5 分钟。',
           reply_markup: {
-            keyboard: [[{ text: '✅ 点击验证', web_app: { url: verifyLink } }]],
-            resize_keyboard: true,
-            one_time_keyboard: true
+            inline_keyboard: [[
+              { text: '✅ 点击验证', web_app: { url: verifyLink } }
+            ]]
           }
         })
       });
@@ -1261,9 +1240,22 @@ export async function onRequest(context) {
     const verifyLink = `${origin}/verify?token=${encodeURIComponent(token)}`;
     const nowSec = Math.floor(Date.now() / 1000);
     const codeExpiry = nowSec + VERIFY_CODE_TTL;
+    
     await env.D1.prepare('UPDATE user_states SET is_verifying = TRUE, code_expiry = ? WHERE chat_id = ?')
       .bind(codeExpiry, chatId).run();
-    await sendMessageToUser(chatId, `🔗 链接在这，5 分钟：\n${verifyLink}`);
+
+    await fetchWithRetry(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: '🔗 验证还没过期，点下面继续：',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '✅ 点击验证', web_app: { url: verifyLink } }
+          ]]
+        }
+      })
+    });
   }
 
   // ============================================================
@@ -1322,7 +1314,7 @@ export async function onRequest(context) {
         { text: '🗑 删除用户', callback_data: `delete_user_${privateChatId}` }
       ],
       [
-        { text: '⭐️ 项目地址 ⭐️', url: 'https://github.com/oyz8/Minigram' }
+        { text: '➡️ 项目地址', url: 'https://github.com/oyz8/Minigram' }
       ]
     ];
 
@@ -1475,7 +1467,6 @@ export async function onRequest(context) {
       return;
     }
 
-    // 如果这次操作把当前话题删除了, 就不再往已删除的话题发消息 / 刷新面板
     let skipPanelRefresh = false;
 
     try {
@@ -1507,7 +1498,6 @@ export async function onRequest(context) {
       } else if (action === 'user_info') {
         await sendUserInfo(topicId, privateChatId);
       } else if (action === 'delete_user') {
-        // 判断即将删除的用户话题, 是否正是当前管理员所在话题
         const userTopic = await env.D1.prepare(
           'SELECT topic_id FROM chat_topic_mappings WHERE chat_id = ?'
         ).bind(privateChatId).first();
@@ -1615,7 +1605,6 @@ export async function onRequest(context) {
       `• /del          回复某条消息后发送，删除该消息`;
 
     const mr = await sendMessageToTopic(topicId, pinned);
-    // 置顶失败不应阻塞话题创建 (可能缺 Pin Messages 权限)
     try {
       await pinMessage(topicId, mr.result.message_id);
     } catch (e) {
@@ -1642,7 +1631,6 @@ export async function onRequest(context) {
     ).bind(tidStr).first();
 
     if (r && r.chat_id) {
-      // 回填缓存, 下次同话题操作直接命中
       topicIdCache.set(r.chat_id, tidStr);
       return r.chat_id;
     }
@@ -1740,12 +1728,11 @@ export async function onRequest(context) {
           continue;
         }
         if (response.ok) return response;
-        // 非 2xx 时把响应体一起抛出, 便于排查 Telegram 返回的 description
         let detail = '';
         try {
           const clone = response.clone();
           detail = (await clone.text()).slice(0, 500);
-        } catch (_) { /* ignore */ }
+        } catch (_) { }
         throw new Error(`HTTP ${response.status}${detail ? ': ' + detail : ''}`);
       } catch (e) {
         if (i === retries - 1) throw e;
