@@ -21,6 +21,7 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'strict-origin-when-cross-origin'
 };
 
+// 放宽 frame-ancestors，解决移动端 WebView 加载瞬间被拦截收回的问题
 const VERIFY_PAGE_CSP =
   "default-src 'self'; " +
   "script-src 'self' 'unsafe-inline' https://telegram.org https://challenges.cloudflare.com; " +
@@ -31,8 +32,8 @@ const VERIFY_PAGE_CSP =
   "base-uri 'none'; form-action 'self'; " +
   "frame-ancestors *;"; 
 
-const VERIFY_TOKEN_TTL = 60 * 60;  // token 自身有效期 1 小时
-const VERIFY_CODE_TTL  = 5 * 60;   // 单次验证窗口 5 分钟
+const VERIFY_TOKEN_TTL = 60 * 60;
+const VERIFY_CODE_TTL  = 5 * 60;
 
 const SHARED_SECRET_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 
@@ -207,7 +208,7 @@ function renderVerifyPage(token, env) {
   --chip:rgba(148,163,184,.10);
   --avatar-bg:#0f172a;
 }
-
+/* 修正移动端 WebView 高度计算 */
 html{height:100%;}
 body{
   height:100%;
@@ -473,6 +474,7 @@ function onTurnstileSuccess(turnstileToken) {
       isDone = true;
       setStatus('<span class="icon-success">' + ICON_CHECK + '</span>验证成功！', 'success', false);
       
+      // 移动端闪退修复：验证成功后延迟关闭，给 WebView 缓冲时间
       setTimeout(() => {
         if (!isDone) return;
         if (!tryClose()) {
@@ -492,6 +494,7 @@ export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
 
+  // 根路径: 交给静态资源
   if (url.pathname === '/' && request.method === 'GET') {
     if (env.ASSETS) return env.ASSETS.fetch(request);
     return new Response(
@@ -1214,6 +1217,7 @@ export async function onRequest(context) {
       await env.D1.prepare('UPDATE user_states SET is_verifying=?, code_expiry=? WHERE chat_id=?')
         .bind(true, codeExpiry, chatId).run();
 
+      // 改用 inline_keyboard，解决移动端需要点红箭头才能看到按钮的问题
       await fetchWithRetry(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1244,6 +1248,7 @@ export async function onRequest(context) {
     await env.D1.prepare('UPDATE user_states SET is_verifying = TRUE, code_expiry = ? WHERE chat_id = ?')
       .bind(codeExpiry, chatId).run();
 
+    // 改用 inline_keyboard
     await fetchWithRetry(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1314,7 +1319,7 @@ export async function onRequest(context) {
         { text: '🗑 删除用户', callback_data: `delete_user_${privateChatId}` }
       ],
       [
-        { text: '➡️ 项目地址', url: 'https://github.com/oyz8/Minigram' }
+        { text: '⭐️ 项目地址 ⭐️', url: 'https://github.com/oyz8/Minigram' }
       ]
     ];
 
